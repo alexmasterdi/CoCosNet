@@ -47,19 +47,5 @@ input_sem = torch.randn(1, 151, 256, 256)
 ref_sem = torch.randn(1, 151, 256, 256)
 warp_out = torch.randn(1, 154, 256, 256)
 
-
-def own_var(input, dim, keepdim=False, unbiased=True, out=None):
-    E = torch.mean(input, dim)
-    E_up = torch.mean(torch.pow(input, 2), dim)
-    Var = E_up - torch.pow(E, 2)
-    shape = input.shape
-    print(shape[dim])
-    return Var * (shape[dim]/(shape[dim] - 1))
-
-
-def symbolic_range_tensor(g, start, end, step):
-    return g.op("Range", start, end, step)
-
-from torch.onnx import register_custom_op_symbolic
-register_custom_op_symbolic('custom_ops::range_tensor', symbolic_range_tensor, 9)
 torch.onnx.export(model.net['netCorr'], (ref_image, real_image, input_sem, ref_sem), "Corr.onnx", opset_version=11, enable_onnx_checker=True)
+#torch.onnx.export(model.net['netG'], (input_sem, wrap_out), "Gen.onnx", opset_version=11, enable_onnx_checker=True)
