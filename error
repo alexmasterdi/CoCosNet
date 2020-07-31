@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "infer.py", line 29, in <module>
+    sys.exit(main() or 0)
+  File "infer.py", line 24, in main
+    net = ie.read_network(model)
+  File "ie_api.pyx", line 261, in openvino.inference_engine.ie_api.IECore.read_network
+  File "ie_api.pyx", line 289, in openvino.inference_engine.ie_api.IECore.read_network
+RuntimeError: While validating ONNX node '<Node(Constant): Constant_0>':
+Check 'values.size() == 1 || values.size() == shape_size(m_shape)' failed at /home/alex-di/openvino/ngraph/src/ngraph/op/constant.hpp:69:
+While validating node 'v0::Constant Constant_295() -> (f32{})':
+Did not get the expected number of literals for a constant of shape Shape{} (got 0, expected 1).
+
