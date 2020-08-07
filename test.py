@@ -30,7 +30,7 @@ for i, data_i in enumerate(dataloader):
         break
     imgs_num = data_i['label'].shape[0]
     #data_i['stage1'] = torch.ones_like(data_i['stage1'])
-    
+    print(data_i)
     out = model(data_i, mode='inference')
     if opt.save_per_img:
         root = save_root + '/test_per_img/'

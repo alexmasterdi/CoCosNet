@@ -37,6 +37,7 @@ def remove_all_spectral_norm(item):
 
 
 model = Pix2PixModel(opt)
+
 model.eval()
 
 remove_all_spectral_norm(model)
@@ -47,5 +48,6 @@ input_sem = torch.randn(1, 151, 256, 256)
 ref_sem = torch.randn(1, 151, 256, 256)
 warp_out = torch.randn(1, 154, 256, 256)
 
-torch.onnx.export(model.net['netCorr'], (ref_image, real_image, input_sem, ref_sem), "Corr.onnx", opset_version=11, enable_onnx_checker=True)
-#torch.onnx.export(model.net['netG'], (input_sem, wrap_out), "Gen.onnx", opset_version=11, enable_onnx_checker=True)
+torch.onnx.export(model.net['netCorr'], (ref_image, real_image, input_sem, ref_sem), "Corr_opset11.onnx", opset_version=11, verbose=True)
+
+#torch.onnx.export(model.net['netG'], (input_sem, warp_out), "Corr_opset11.onnx", opset_version=11, verbose=True)

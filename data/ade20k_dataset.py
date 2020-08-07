@@ -54,6 +54,7 @@ class ADE20KDataset(Pix2pixDataset):
                 val = items[1:]
             else:
                 val = [items[1], items[-1]]
+            print(key, val)
             ref_dict[key] = val
         train_test_folder = ('training', 'validation')
         return ref_dict, train_test_folder

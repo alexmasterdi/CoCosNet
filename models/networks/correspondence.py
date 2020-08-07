@@ -3,7 +3,9 @@
 
 import sys
 import torch
+from torchvision import transforms
 import torch.nn as nn
+import numpy as np
 import torch.nn.functional as F
 from models.networks.base_network import BaseNetwork
 from models.networks.generator import AdaptiveFeatureGenerator, DomainClassifier, ReverseLayerF
@@ -15,20 +17,20 @@ class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, stride=1):
         super(ResidualBlock, self).__init__()
         self.padding1 = nn.ReflectionPad2d(padding)
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=0, stride=stride)
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=1, stride=stride)
         self.bn1 = nn.InstanceNorm2d(out_channels)
         self.prelu = nn.PReLU()
         self.padding2 = nn.ReflectionPad2d(padding)
-        self.conv2 = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=0, stride=stride)
+        self.conv2 = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=1, stride=stride)
         self.bn2 = nn.InstanceNorm2d(out_channels)
 
     def forward(self, x):
         residual = x
-        out = self.padding1(x)
-        out = self.conv1(out)
+        #out = self.padding1(x)
+        out = self.conv1(x)
         out = self.bn1(out)
         out = self.prelu(out)
-        out = self.padding2(out)
+        #out = self.padding2(out)
         out = self.conv2(out)
         out = self.bn2(out)
         out += residual
@@ -203,11 +205,11 @@ class NoVGGCorrespondence(BaseNetwork):
         bs, _, h, w = x.shape
         xx_ones = torch.ones([bs, h, 1], dtype=x.dtype, device=x.device)
         xx_range = torch.arange(w, dtype=x.dtype, device=x.device).unsqueeze(0).repeat([bs, 1]).unsqueeze(1)
-        xx_channel = torch.matmul(xx_ones, xx_range).unsqueeze(1)
+        xx_channel = xx_ones.matmul(xx_range).unsqueeze(1)
 
         yy_ones = torch.ones([bs, 1, w], dtype=x.dtype, device=x.device)
         yy_range = torch.arange(h, dtype=x.dtype, device=x.device).unsqueeze(0).repeat([bs, 1]).unsqueeze(-1)
-        yy_channel = torch.matmul(yy_range, yy_ones).unsqueeze(1)
+        yy_channel = yy_range.matmul(yy_ones).unsqueeze(1)
 
         xx_channel = xx_channel.float() / (w - 1)
         yy_channel = yy_channel.float() / (h - 1)
@@ -218,6 +220,11 @@ class NoVGGCorrespondence(BaseNetwork):
         
         concat = torch.cat((x, xx_channel, yy_channel, rr_channel), dim=1)
         return concat
+    
+
+    def L2_norm(self, input):
+        return input.pow(2).sum(dim=1, keepdim=True).sqrt()
+
 
     def forward(self,
                 ref_img,
@@ -233,8 +240,8 @@ class NoVGGCorrespondence(BaseNetwork):
         batch_size = ref_img.shape[0]
         image_height = ref_img.shape[2]
         image_width = ref_img.shape[3]
-        feature_height = int(image_height / self.opt.down)
-        feature_width = int(image_width / self.opt.down)
+        feature_height = int(image_height // self.opt.down)
+        feature_width = int(image_width // self.opt.down)
 
         if self.opt.mask_noise: #add noise to mask
             noise = torch.randn_like(seg_map, requires_grad=False) * 0.1
@@ -254,9 +261,14 @@ class NoVGGCorrespondence(BaseNetwork):
         if self.opt.use_coordconv:
             adaptive_feature_seg = self.addcoords(adaptive_feature_seg)
             adaptive_feature_img = self.addcoords(adaptive_feature_img)
-        
-        seg = F.interpolate(seg_map, size=adaptive_feature_seg.size()[2:], mode='nearest')
-        ref_seg = F.interpolate(ref_seg_map, size=adaptive_feature_img.size()[2:], mode='nearest')
+        # scale interpolation
+        shape_seg_map = np.float32(seg_map.size())
+        shape_adaptive_seg = np.float32(adaptive_feature_seg.size())
+        seg = F.interpolate(seg_map, scale_factor = (shape_adaptive_seg[2]/shape_seg_map[2], shape_adaptive_seg[3]/shape_seg_map[3]), mode='nearest')
+        # scale interpolation
+        shape_ref_seg_map = np.float32(ref_seg_map.size())
+        shape_adaptive_img = np.float32(adaptive_feature_img.size())
+        ref_seg = F.interpolate(ref_seg_map, scale_factor = (shape_adaptive_img[2]/shape_ref_seg_map[2], shape_adaptive_img[3]/shape_ref_seg_map[3]), mode='nearest')
         if self.opt.maskmix:
             cont_features = self.layer(torch.cat((adaptive_feature_seg, seg), 1))
             if self.opt.noise_for_mask and ((not self.opt.isTrain) or (self.opt.isTrain and self.opt.epoch > self.opt.mask_epoch)):
@@ -267,7 +279,7 @@ class NoVGGCorrespondence(BaseNetwork):
         else:
             cont_features = self.layer(adaptive_feature_seg)
             ref_features = self.layer(adaptive_feature_img)
-
+        
         # pairwise cosine similarity
         theta = self.theta(cont_features)
         if self.opt.match_kernel == 1:
@@ -276,8 +288,9 @@ class NoVGGCorrespondence(BaseNetwork):
             theta = F.unfold(theta, kernel_size=self.opt.match_kernel, padding=int(self.opt.match_kernel // 2))
         dim_mean = 1 if self.opt.PONO_C else -1
         theta = theta - theta.mean(dim=dim_mean, keepdim=True)  # center the feature
-        theta_norm = torch.norm(theta, 2, 1, keepdim=True) + sys.float_info.epsilon
-        theta = torch.div(theta, theta_norm)
+        # theta L2 norm compute
+        theta_norm = self.L2_norm(theta) + sys.float_info.epsilon
+        theta = theta.div(theta_norm)
         theta_permute = theta.permute(0, 2, 1)  # 2*(feature_height*feature_width)*256
         phi = self.phi(ref_features)
         if self.opt.match_kernel == 1:
@@ -285,10 +298,10 @@ class NoVGGCorrespondence(BaseNetwork):
         else:
             phi = F.unfold(phi, kernel_size=self.opt.match_kernel, padding=int(self.opt.match_kernel // 2))
         phi = phi - phi.mean(dim=dim_mean, keepdim=True)  # center the feature
-        phi_norm = torch.norm(phi, 2, 1, keepdim=True) + sys.float_info.epsilon
-        phi = torch.div(phi, phi_norm)
-
-        f = torch.matmul(theta_permute, phi)  # 2*(feature_height*feature_width)*(feature_height*feature_width)
+        phi_norm = self.L2_norm(phi) + sys.float_info.epsilon
+        phi = phi.div(phi_norm)
+        
+        f = theta_permute.matmul(phi)  # 2*(feature_height*feature_width)*(feature_height*feature_width)
         if detach_flag:
             f = f.detach()
 
@@ -314,8 +327,10 @@ class NoVGGCorrespondence(BaseNetwork):
             channel = ref.shape[1]
             ref = ref.view(batch_size, channel, -1)
         ref = ref.permute(0, 2, 1)
-
-        y = torch.matmul(f_div_C, ref)  # 2*1936*channel
+        
+        
+        y = f_div_C.matmul(ref)  # 2*1936*channel
+        
         if self.opt.warp_patch:
             y = y.permute(0, 2, 1)
             y = F.fold(y, 256, self.opt.down, stride=self.opt.down)
@@ -325,9 +340,9 @@ class NoVGGCorrespondence(BaseNetwork):
         if (not self.opt.isTrain) and self.opt.show_corr:
             coor_out['warp_out_bi'] = y if self.opt.warp_patch else self.upsampling_bi(y)
         coor_out['warp_out'] = y if self.opt.warp_patch else self.upsampling(y)
-
+        
         if self.opt.warp_mask_losstype == 'direct' or self.opt.show_warpmask:
-            ref_seg = F.interpolate(ref_seg_map, scale_factor= 1/self.opt.down, mode='nearest')
+            ref_seg = F.interpolate(ref_seg_map, scale_factor= 1.0/self.opt.down, mode='nearest')
             channel = ref_seg.shape[1]
             ref_seg = ref_seg.view(batch_size, channel, -1)
             ref_seg = ref_seg.permute(0, 2, 1)
@@ -336,7 +351,7 @@ class NoVGGCorrespondence(BaseNetwork):
             coor_out['warp_mask'] = warp_mask.view(batch_size, channel, feature_height, feature_width)  # 2*3*44*44
         elif self.opt.warp_mask_losstype == 'cycle':
             f_div_C_v = F.softmax(f_WTA.transpose(1, 2), dim=-1)  # 2*1936*1936; softmax along the vertical line
-            seg = F.interpolate(seg_map, scale_factor=1 / self.opt.down, mode='nearest')
+            seg = F.interpolate(seg_map, scale_factor=1.0 / self.opt.down, mode='nearest')
             channel = seg.shape[1]
             seg = seg.view(batch_size, channel, -1)
             seg = seg.permute(0, 2, 1)
@@ -370,5 +385,5 @@ class NoVGGCorrespondence(BaseNetwork):
                     warp_i2r2i = torch.matmul(f_div_C, warp_i2r.view(batch_size, channel, -1).permute(0, 2, 1))
                     coor_out['warp_i2r'] = warp_i2r
                     coor_out['warp_i2r2i'] = warp_i2r2i.permute(0, 2, 1).contiguous().view(batch_size, channel, feature_height, feature_width)
-
+        
         return coor_out

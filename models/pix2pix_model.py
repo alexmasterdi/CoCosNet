@@ -182,9 +182,9 @@ class Pix2PixModel(torch.nn.Module):
             input_label = self.FloatTensor(bs, nc, h, w).zero_()
             input_semantics = input_label.scatter_(1, label_map, 1.0)
         
-            label_map = data['label_ref']
+            label_map = data['label_ref'].long()
             label_ref = self.FloatTensor(bs, nc, h, w).zero_()
-            ref_semantics = label_ref.scatter_(1, label_map, 1.0)
+            ref_semantics = label_ref.scatter_(1, label_map, 1)
 
         if self.opt.dataset_mode == 'celebahq':
             assert input_semantics[:,-3:-2,:,:].sum().cpu().item() == 0

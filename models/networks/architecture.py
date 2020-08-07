@@ -23,7 +23,7 @@ class SPADEResnetBlock(nn.Module):
         self.learned_shortcut = (fin != fout)
         fmiddle = min(fin, fout)
         self.opt = opt
-        self.pad_type = 'nozero'
+        self.pad_type = 'zero'
         self.use_se = use_se
 
         # create conv layers
@@ -52,11 +52,11 @@ class SPADEResnetBlock(nn.Module):
 
         # define normalization layers
         spade_config_str = opt.norm_G.replace('spectral', '')
+        
         if 'spade_ic' in opt:
             ic = opt.spade_ic
         else:
             ic = 0 + (3 if 'warp' in opt.CBN_intype else 0) + (opt.semantic_nc if 'mask' in opt.CBN_intype else 0)
-        
         self.norm_0 = SPADE(spade_config_str, fin, ic, PONO=opt.PONO, use_apex=opt.apex)
         self.norm_1 = SPADE(spade_config_str, fmiddle, ic, PONO=opt.PONO, use_apex=opt.apex)
         if self.learned_shortcut:
@@ -70,7 +70,7 @@ class SPADEResnetBlock(nn.Module):
     def forward(self, x, seg1):
         x_s = self.shortcut(x, seg1)
         if self.pad_type != 'zero':
-            dx = self.conv_0(self.pad(self.actvn(self.norm_0(x, seg1))))
+            dx = self.conv_0(self.pad(self.actvn(self.norm_0(x, seg1)))) # throw error with input data tensor's rank
             dx = self.conv_1(self.pad(self.actvn(self.norm_1(dx, seg1))))
             if self.use_se:
                 dx = self.se_layar(dx)
@@ -79,7 +79,7 @@ class SPADEResnetBlock(nn.Module):
             dx = self.conv_1(self.actvn(self.norm_1(dx, seg1)))
             if self.use_se:
                 dx = self.se_layar(dx)
-
+       
         out = x_s + dx
 
         return out

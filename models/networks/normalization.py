@@ -88,7 +88,7 @@ class SPADE(nn.Module):
         parsed = re.search('spade(\D+)(\d)x\d', config_text)
         param_free_norm_type = str(parsed.group(1))
         ks = int(parsed.group(2))
-        self.pad_type = 'nozero'
+        self.pad_type = 'zero'
 
         if PONO:
             self.param_free_norm = PositionalNorm2d
@@ -107,8 +107,8 @@ class SPADE(nn.Module):
 
         # The dimension of the intermediate embedding space. Yes, hardcoded.
         nhidden = 128
-
         pw = ks // 2
+        #print(ks, pw)
         if self.pad_type != 'zero':
             self.mlp_shared = nn.Sequential(
                 nn.ReflectionPad2d(pw),
@@ -127,12 +127,14 @@ class SPADE(nn.Module):
             self.mlp_beta = nn.Conv2d(nhidden, norm_nc, kernel_size=ks, padding=pw)
 
     def forward(self, x, segmap, similarity_map=None):
-
+        shape_seg = np.float32(segmap.size())
+        shape_x = np.float32(x.size())
         # Part 1. generate parameter-free normalized activations
         normalized = self.param_free_norm(x)
 
         # Part 2. produce scaling and bias conditioned on semantic map
-        segmap = F.interpolate(segmap, size=x.size()[2:], mode='nearest')
+        segmap = F.interpolate(segmap, scale_factor=(shape_x[2]/shape_seg[2], shape_x[3]/shape_seg[3]), mode='nearest')
+        
         actv = self.mlp_shared(segmap)
         if self.pad_type != 'zero':
             gamma = self.mlp_gamma(self.pad(actv))
@@ -142,7 +144,9 @@ class SPADE(nn.Module):
             beta = self.mlp_beta(actv)
 
         if similarity_map is not None:
-            similarity_map = F.interpolate(similarity_map, size=gamma.size()[2:], mode='nearest')
+            shape_sim = np.float32(similarity_map.size())
+            shape_gamma = np.float32(gamma.size())
+            similarity_map = F.interpolate(similarity_map, scale_factor=(shape_gamma[2]/shape_sim[2], shape_gamma[3]/shape_sim[3]), mode='nearest')
             gamma = gamma * similarity_map
             beta = beta * similarity_map
         # apply scale and bias
@@ -217,8 +221,12 @@ class SPADE_TwoPath(nn.Module):
         normalized = self.param_free_norm(x)
 
         # Part 2. produce scaling and bias conditioned on semantic map
-        segmap = F.interpolate(segmap, size=x.size()[2:], mode='nearest')
-        warpmap = F.interpolate(warpmap, size=x.size()[2:], mode='nearest')
+        shape_seg = list(segmap.size())
+        shape_x = list(x.size())
+        shape_warp = list(warpmap.size())
+        shape_sim = list(similarity_map.size())
+        segmap = F.interpolate(segmap, scale_factor=(shape_x[2]/shape_seg[2], shape_x[3]/shape_seg[3]), mode='nearest')
+        warpmap = F.interpolate(warpmap, scale_factor=(shape_x[2]/shape_warp[2], shape_x[3]/shape_warp[3]), mode='nearest')
         actv_example = self.mlp_shared_example(warpmap)
         actv_imagine = self.mlp_shared_imagine(segmap)
         if self.pad_type != 'zero':
@@ -232,7 +240,7 @@ class SPADE_TwoPath(nn.Module):
             gamma_imagine = self.mlp_gamma_imagine(actv_imagine)
             beta_imagine = self.mlp_beta_imagine(actv_imagine)
 
-        similarity_map = F.interpolate(similarity_map, size=x.size()[2:], mode='nearest')
+        similarity_map = F.interpolate(similarity_map, scale_factor=(shape_x[2]/shape_sim[2], shape_x[3]/shape_sim[3]), mode='nearest')
         gamma = gamma_example * similarity_map + gamma_imagine * (1 - similarity_map)
         beta = beta_example * similarity_map + beta_imagine * (1 - similarity_map)
         # apply scale and bias

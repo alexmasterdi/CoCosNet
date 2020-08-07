@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 from torch.autograd import Function
 from models.networks.base_network import BaseNetwork
 from models.networks.normalization import get_nonspade_norm_layer, equal_lr
@@ -58,14 +59,17 @@ class SPADEGenerator(BaseNetwork):
         return sw, sh
 
     def forward(self, input, warp_out=None):
+        
         seg = input if warp_out is None else warp_out
 
         # we downsample segmap and run convolution
-        x = F.interpolate(seg, size=(self.sh, self.sw))
+        x = F.interpolate(seg, scale_factor=(0.03125, 0.03125))
+        
+        
+        
         x = self.fc(x)
-
-        x = self.head_0(x, seg)
-
+        x = self.head_0(x, seg) # error with input data tensor's rank
+        
         x = self.up(x)
         x = self.G_middle_0(x, seg)
 
@@ -85,7 +89,7 @@ class SPADEGenerator(BaseNetwork):
 
         x = self.conv_img(F.leaky_relu(x, 2e-1))
         x = F.tanh(x)
-
+        
         return x
 
 class AdaptiveFeatureGenerator(BaseNetwork):

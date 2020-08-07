@@ -12,16 +12,21 @@ def build_argparser():
     parser = ArgumentParser(add_help=False)
     args = parser.add_argument_group('Options')
     args.add_argument('-h', '--help', action='help', default=SUPPRESS, help='Show this help message and exit.')
-    args.add_argument("-m", "--model", help="Required. Path to an .xml file with a trained model.", required=True,
-                      type=str)
+    args.add_argument("-g", "--generator_network", help="Required. Path to an .onnx file with a trained generator model.", required=True,
+                      type=str, default="../onnx_models/Gen_opset11.onnx")
+    args.add_argument("-c", "--correspondence_network", help="Required. Path to an .onnx file with a trained correspondence model.", required=True,
+                      type=str, default="../onnx_models/Corr_opset11.onnx")
     return parser
 
 
 def main():
     args = build_argparser().parse_args()
-    model = args.model
+    gen = args.generator_network
+    corr = args.correspondence_network
     ie = IECore()
-    net = ie.read_network(model)
+    net_g = ie.read_network(corr)
+    for key in net_g.input_info.keys():
+        print(net_g.input_info[key].input_data.shape)
     return 0
 
 
