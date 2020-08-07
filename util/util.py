@@ -231,6 +231,14 @@ def save_network(net, label, epoch, opt):
         net.cuda()
 
 
+def transform_keys(checkpoint):
+    for key in list(checkpoint.keys()):
+        if 'mlp_shared' in key:
+            checkpoint[key.replace('mlp_shared.1', 'mlp_shared.0')] = checkpoint[key]
+            del checkpoint[key]
+    return checkpoint
+
+
 def load_network(net, label, epoch, opt):
     save_filename = '%s_net_%s.pth' % (epoch, label)
     save_dir = os.path.join(opt.checkpoints_dir, opt.name)
@@ -239,6 +247,8 @@ def load_network(net, label, epoch, opt):
         print('not find model :' + save_path + ', do not load model!')
         return net
     weights = torch.load(save_path)
+    if label == 'G' or label == 'Corr':
+        transform_keys(weights)
     try:
         net.load_state_dict(weights)
     except KeyError:
