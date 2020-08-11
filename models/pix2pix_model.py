@@ -50,7 +50,6 @@ class Pix2PixModel(torch.nn.Module):
     # routines based on |mode|.
     def forward(self, data, mode, GforD=None, alpha=1):
         input_label, input_semantics, real_image, self_ref, ref_image, ref_label, ref_semantics = self.preprocess_input(data, )
-
         self.alpha = alpha
         generated_out = {}
         if mode == 'generator':
@@ -335,6 +334,7 @@ class Pix2PixModel(torch.nn.Module):
         generate_out['fake_image'] = self.net['netG'](input_semantics, warp_out=CBN_in)
         generate_out = {**generate_out, **coor_out}
         return generate_out
+        
 
     # Given fake and real image, return the prediction of discriminator
     # for each fake and real image.

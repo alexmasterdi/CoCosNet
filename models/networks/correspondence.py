@@ -253,6 +253,7 @@ class NoVGGCorrespondence(BaseNetwork):
         adaptive_feature_img = self.adaptive_model_img(ref_img, ref_img)
         adaptive_feature_seg = util.feature_normalize(adaptive_feature_seg)
         adaptive_feature_img = util.feature_normalize(adaptive_feature_img)
+        '''
         if self.opt.isTrain and self.opt.novgg_featpair > 0:
             adaptive_feature_img_pair = self.adaptive_model_img(real_img, real_img)
             adaptive_feature_img_pair = util.feature_normalize(adaptive_feature_img_pair)
@@ -261,6 +262,8 @@ class NoVGGCorrespondence(BaseNetwork):
         if self.opt.use_coordconv:
             adaptive_feature_seg = self.addcoords(adaptive_feature_seg)
             adaptive_feature_img = self.addcoords(adaptive_feature_img)
+        '''
+        
         # scale interpolation
         shape_seg_map = np.float32(seg_map.size())
         shape_adaptive_seg = np.float32(adaptive_feature_seg.size())
@@ -292,9 +295,10 @@ class NoVGGCorrespondence(BaseNetwork):
         theta_norm = self.L2_norm(theta) + sys.float_info.epsilon
         theta = theta.div(theta_norm)
         theta_permute = theta.permute(0, 2, 1)  # 2*(feature_height*feature_width)*256
+        
         phi = self.phi(ref_features)
         if self.opt.match_kernel == 1:
-            phi = phi.view(batch_size, self.inter_channels, -1)  # 2*256*(feature_height*feature_width)
+            phi = phi.view(batch_size, self.inter_channels, -1) # 2*256*(feature_height*feature_width)
         else:
             phi = F.unfold(phi, kernel_size=self.opt.match_kernel, padding=int(self.opt.match_kernel // 2))
         phi = phi - phi.mean(dim=dim_mean, keepdim=True)  # center the feature
@@ -302,6 +306,7 @@ class NoVGGCorrespondence(BaseNetwork):
         phi = phi.div(phi_norm)
         
         f = theta_permute.matmul(phi)  # 2*(feature_height*feature_width)*(feature_height*feature_width)
+        
         if detach_flag:
             f = f.detach()
 
@@ -327,7 +332,7 @@ class NoVGGCorrespondence(BaseNetwork):
             channel = ref.shape[1]
             ref = ref.view(batch_size, channel, -1)
         ref = ref.permute(0, 2, 1)
-        
+        f_div_C = torch.unsqueeze(f_div_C, 0)
         
         y = f_div_C.matmul(ref)  # 2*1936*channel
         

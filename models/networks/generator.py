@@ -143,11 +143,12 @@ class AdaptiveFeatureGenerator(BaseNetwork):
 
     def forward(self, input, seg):
         x = self.layer1(input)
+        
         x = self.layer2(self.actvn(x))
         x = self.layer3(self.actvn(x))
         x = self.layer4(self.actvn(x))
         x = self.layer5(self.actvn(x))
-
+        
         x = self.head_0(x, seg)
         if self.opt.adaptor_nonlocal:
             x = self.attn(x)
@@ -160,7 +161,7 @@ class AdaptiveFeatureGenerator(BaseNetwork):
             if self.opt.dilation_conv:
                 x = self.degridding0(x)
                 x = self.degridding1(x)
-
+        
         return x
 
 class ReverseGenerator(BaseNetwork):
