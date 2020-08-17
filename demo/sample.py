@@ -2,6 +2,8 @@ import numpy as np
 import sys
 import cv2
 from PIL import Image
+import torch
+from torchvision import transforms
 from argparse import ArgumentParser, SUPPRESS
 from openvino.inference_engine import IECore
 
@@ -48,6 +50,42 @@ class correspondence_model:
         input[self.reference_semantics] = ref_semantic
         out = self.exec_net.infer(inputs=input)
         return out
+
+
+def img_transform(img):
+    # 0-255 to 0-1
+    img = np.float32(np.array(img)) / 255.
+    img = img.transpose((2, 0, 1))
+    mean = np.array([0.485, 0.456, 0.406])
+    std = np.array([0.229, 0.224, 0.225])
+    tr = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225])
+    img = tr(torch.from_numpy(img.copy()))
+    img = img.numpy()
+    return np.array([img])
+
+
+def preprocess_seg(image_path):
+	img = Image.open(image_path).convert('RGB')
+	w, h = img.size
+	img = img.resize(size=(320, 320), resample=Image.BILINEAR)
+	img = img_transform(img)
+	return img
+
+
+class segmentation_model:
+    def __init__(self, path, core):
+        self.network = core.read_network(path)
+        self.input_blob = next(iter(self.network.input_info))
+        self.output_blob = next(iter(self.network.outputs))
+        self.exec_net = core.load_network(network=self.network, device_name="CPU")
+        print("Segmentation model create!")
+
+    def infer(self, image_path):
+        image = preprocess_seg(image_path)
+        out = self.exec_net.infer(inputs={self.input_blob: image})
+        return out[self.output_blob]
 
 
 class generate_model:

@@ -6,18 +6,34 @@ import numpy as np
 from PIL import Image
 import sample as lib
 import cv2
+from argparse import ArgumentParser, SUPPRESS
 from openvino.inference_engine import IECore
 
+
+def build_argparser():
+    parser = ArgumentParser(add_help=False)
+    args = parser.add_argument_group('Options')
+    args.add_argument('-h', '--help', action='help', default=SUPPRESS, help='Show this help message and exit.')
+    args.add_argument("-s", "--segmentation_network", help="Required. Path to the segmentation network",
+    	              default="../onnx_models/Seg_opset9.onnx", type=str)
+    args.add_argument("-c", "--correspondence_network", help="Required. Path to the correspondence_network",
+    	              default="../onnx_models/true/Corr_opset11.onnx", type=str)
+    args.add_argument("-g", "--generate_network", help="Required. Path to the generator",
+    	              default="../onnx_models/true/Gen_opset11.onnx", type=str)
+    return parser
+
+
 class App(QtWidgets.QMainWindow, design.Ui_MainWindow):
-    def __init__(self):
+    def __init__(self, args):
         super().__init__()
         self.setupUi(self)
         self.pushButton.clicked.connect(self.get_image)
         self.pushButton_2.clicked.connect(self.get_reference)
         self.pushButton_3.clicked.connect(self.inference)
         self.core = IECore()
-        self.Corr = lib.correspondence_model("../onnx_models/Corr_opset11.onnx", self.core)
-        self.Gen = lib.generate_model("../onnx_models/Gen_opset11.onnx", self.core)
+        self.Corr = lib.correspondence_model(args.correspondence_network, self.core)
+        self.Gen = lib.generate_model(args.generate_network, self.core)
+        self.Seg = lib.segmentation_model(args.segmentation_network, self.core)
     
 
     def array2QImage(self, image):
@@ -34,7 +50,7 @@ class App(QtWidgets.QMainWindow, design.Ui_MainWindow):
         if file_name:
             self.image_path = file_name[0]
             image = cv2.imread(file_name[0])
-            image = cv2.resize(image, dsize=(512, 512), interpolation=Image.BICUBIC)
+            image = cv2.resize(image, dsize=(300, 300), interpolation=Image.BICUBIC)
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             pixmap = QPixmap(self.array2QImage(image))
             self.label.setPixmap(pixmap)
@@ -46,19 +62,33 @@ class App(QtWidgets.QMainWindow, design.Ui_MainWindow):
         if file_name: 
             self.ref_path = file_name[0]
             image = cv2.imread(file_name[0])
-            image = cv2.resize(image, dsize=(512, 512), interpolation=Image.BICUBIC)
+            image = cv2.resize(image, dsize=(300, 300), interpolation=Image.BICUBIC)
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             pixmap = QPixmap(self.array2QImage(image))
             self.label_2.setPixmap(pixmap)
     
+    
+    def get_mask_from_image(self, image):
+        res = self.Seg.infer(image)
+        mask = np.argmax(res, axis=1)
+        mask = np.squeeze(mask, 0)
+        return mask
+
 
     def preprocess(self):
+        # reading
         real_image = cv2.imread(self.image_path)
-        input_semantics = cv2.imread(lib.imgpath_to_labelpath(self.image_path), cv2.IMREAD_GRAYSCALE)
+        ori_sem = cv2.imread(lib.imgpath_to_labelpath(self.image_path), cv2.IMREAD_GRAYSCALE)
+        print(ori_sem.shape)
+        input_semantics = self.get_mask_from_image(self.image_path) + 1
+        #np.testing.assert_allclose(ori_sem, input_semantics + 1, rtol=1e-03, atol=1e-05)
         reference_image = cv2.imread(self.ref_path)
-        reference_semantics = cv2.imread(lib.imgpath_to_labelpath(self.ref_path), cv2.IMREAD_GRAYSCALE)
-        input_semantics = lib.preprocess_with_semantics(input_semantics)
-        reference_semantics = lib.preprocess_with_semantics(reference_semantics)
+        ori_ref_sem = cv2.imread(lib.imgpath_to_labelpath(self.ref_path), cv2.IMREAD_GRAYSCALE)
+        reference_semantics = self.get_mask_from_image(self.ref_path) + 1
+        #np.testing.assert_allclose(ori_ref_sem, reference_semantics + 1, rtol=1e-03, atol=1e-05)
+        #produce one-hot labels maps
+        #input_semantics = lib.preprocess_with_semantics(input_semantics)
+        #reference_semantics = lib.preprocess_with_semantics(reference_semantics)
         reference_image = lib.preprocess_with_images(reference_image)
         input_semantics, reference_semantics = lib.preprocess_input(input_semantics, reference_semantics)
         return input_semantics, reference_image, reference_semantics
@@ -72,15 +102,16 @@ class App(QtWidgets.QMainWindow, design.Ui_MainWindow):
         out = lib.postprocess(out)
         print(out.shape)
         print(type(out))
-        out = cv2.resize(out, dsize=(512, 512), interpolation=Image.BICUBIC)
+        out = cv2.resize(out, dsize=(300, 300), interpolation=Image.BICUBIC)
         pix = QPixmap(self.array2QImage(out))
         self.label_3.setPixmap(pix)
 
 
 
 def main():
+    args = build_argparser().parse_args()
     app = QtWidgets.QApplication(sys.argv)
-    window = App()
+    window = App(args)
     window.show()
     app.exec_()
 
