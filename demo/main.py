@@ -79,20 +79,22 @@ class App(QtWidgets.QMainWindow, design.Ui_MainWindow):
     def preprocess(self, image_path=None, ref_path=None):
         # reading
         real_image = cv2.imread(self.image_path)
+        input_semantics = []
         if image_path:
-            ori_sem = cv2.imread(lib.imgpath_to_labelpath(self.image_path), cv2.IMREAD_GRAYSCALE)
+            input_semantics = cv2.imread(lib.imgpath_to_labelpath(self.image_path), cv2.IMREAD_GRAYSCALE)
         else:
             input_semantics = self.get_mask_from_image(self.image_path) + 1
         #np.testing.assert_allclose(ori_sem, input_semantics + 1, rtol=1e-03, atol=1e-05)
         reference_image = cv2.imread(self.ref_path)
+        reference_semantics = []
         if ref_path:
-            ori_ref_sem = cv2.imread(lib.imgpath_to_labelpath(self.ref_path), cv2.IMREAD_GRAYSCALE)
+            reference_semantics = cv2.imread(lib.imgpath_to_labelpath(self.ref_path), cv2.IMREAD_GRAYSCALE)
         else:
             reference_semantics = self.get_mask_from_image(self.ref_path) + 1
         #np.testing.assert_allclose(ori_ref_sem, reference_semantics + 1, rtol=1e-03, atol=1e-05)
         #produce one-hot labels maps
-        #input_semantics = lib.preprocess_with_semantics(input_semantics)
-        #reference_semantics = lib.preprocess_with_semantics(reference_semantics)
+        input_semantics = lib.preprocess_with_semantics(input_semantics)
+        reference_semantics = lib.preprocess_with_semantics(reference_semantics)
         reference_image = lib.preprocess_with_images(reference_image)
         input_semantics, reference_semantics = lib.preprocess_input(input_semantics, reference_semantics)
         return input_semantics, reference_image, reference_semantics
