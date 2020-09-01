@@ -1,10 +1,12 @@
 import sys
 import cv2
+import io
 import numpy as np
+from PIL import Image
 from PyQt5 import QtCore, QtGui, QtWidgets, uic
 from PyQt5.QtWidgets import QScrollArea, QSizePolicy
 from PyQt5.QtGui import QIcon, QPixmap, QImage, QPalette, QColor
-from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtCore import Qt, QPoint, QBuffer
 from argparse import ArgumentParser, SUPPRESS
 from openvino.inference_engine import IECore
 sys.path.append("../")
@@ -17,16 +19,32 @@ def build_argparser():
     args = parser.add_argument_group('Options')
     args.add_argument('-h', '--help', action='help', default=SUPPRESS, help='Show this help message and exit.')
     args.add_argument("-s", "--segmentation_network", help="Required. Path to the segmentation network",
-    	              default="../../onnx_models/Seg_opset9.onnx", type=str)
+    	              default="../../onnx_models/Seg_opset11_320.onnx", type=str)
     args.add_argument("-c", "--correspondence_network", help="Required. Path to the correspondence_network",
-    	              default="../../onnx_models/Corr_opset11.onnx", type=str)
+    	              default="../../onnx_models/true/Corr_opset11.onnx", type=str)
     args.add_argument("-g", "--generate_network", help="Required. Path to the generator",
-    	              default="../../onnx_models/Gen_opset11.onnx", type=str)
+    	              default="../../onnx_models/true/Gen_opset11.onnx", type=str)
     return parser
 
 
-dx = [-1, -1, -1, 0, 0, 1, 1, 1]
-dy = [-1, 0, 1, -1, 1, -1, 0, 1]
+dx = [-1, 0, 0, 1]
+dy = [0, -1, 1, 0]
+
+# map for 16 items and rubber
+COLORS = {
+    'wall': '#787878', 'sky': '#06E6E6', 'tree': '#04C803', 'road': '#8C8C8C', 'door': '#08FF33',
+    'person': '#96053D', 'ground': '#787846', 'water': '#3DE6FA', 'sea': '#0907E6', 'building': '#B47878',
+    'grass': '#04FA07', 'plants': '#CCFF04', 'car': '#0066C8', 'house': '#FF09E0', 'waterfall': '#00E0FF',
+    'mountain': '#8FFF8C', 'rubber': '#ffffff'
+}
+
+LABELS = {
+    (120, 120, 120): 1, (6, 230, 230): 3, (4, 200, 3): 5, (140, 140, 140): 7, (8, 255, 51): 15,
+    (150, 5, 61): 13, (120, 120, 70): 14, (61, 230, 250): 22, (9, 7, 230): 27, (180, 120, 120): 2,
+    (4, 250, 7): 10, (204, 255, 4): 18, (0, 102, 200): 21, (255, 9, 224): 26, (0, 224, 255): 114,
+    (143, 255, 140): 17, (255, 255, 255): 0
+}
+
 class Canvas(QtWidgets.QLabel):
 
     def __init__(self):
@@ -35,6 +53,7 @@ class Canvas(QtWidgets.QLabel):
         pixmap = QtGui.QPixmap(self.size())
         pixmap.fill(Qt.white)
         self.img = pixmap.toImage()
+        self.mask = np.zeros((300, 300))
         self.setPixmap(pixmap)
         self.draw = True
         self.was = np.zeros((300, 300))
@@ -56,32 +75,42 @@ class Canvas(QtWidgets.QLabel):
 
     def set_pen_width(self, width):
         self.pen_width = width
-    
+        
     def check(self, x, y):
         if (x < 0) or (y < 0) or x >= self.width() or y >= self.height():
             return False
-        col = QColor(self.pixmap().toImage().pixel(x,y)).getRgbF()
-        if col == (1.0, 1.0, 1.0, 1.0):
-            return True
-        return False
-    
-    def color_bfs(self, x, y, painter):
-        q = Queue()
-        q.put((x, y))
+        return True
+
+    def color_filling_by_bfs(self, x, y, painter):
+        # prepare canvas
+        image = self.pixmap().toImage()
+        w, h = image.width(), image.height()
+        s = image.bits().asstring(w * h * 4)
+        target_color = image.pixel(x,y)
+        target_color = target_color.to_bytes(4, byteorder='big')[::-1]
+        s = b''.join(b'\xff' if s[n:n+4] == target_color else b'\x00' for n in range(0, len(s), 4))
+        def get_pixel(x, y):
+            i = (x + (y * w))
+            return s[i]
+        queue = [(x, y)]
         self.was[x][y] = 1
-        print("begin")
-        while not q.empty():
-            x, y = q.get()
-            #self.img.setPixelColor(QPoint(x, y), self.pen_color)
+        while queue != []:
+            x, y = queue.pop()
             painter.drawPoint(QPoint(x, y))
-            self.update()
-            for i in range(8):
+            for i in range(4):
                 _x = x + dx[i]
                 _y = y + dy[i]
-                if self.check(_x, _y) and self.was[_x][_y] == 0:
-                    q.put((_x, _y))
+                if self.check(_x, _y) and get_pixel(_x, _y) and self.was[_x][_y] == 0:
+                    queue.append((_x, _y))
                     self.was[_x][_y] = 1
 
+    def get_mask(self):
+        img = self.pixmap().toImage()
+        for i in range(300):
+            for j in range(300):
+                c = img.pixel(i, j)
+                color = QColor(c).getRgb()[:-1]
+                self.mask[j][i] = LABELS[color]
 
     def mouseMoveEvent(self, e):
         if self.last_x is None: # First event.
@@ -112,23 +141,15 @@ class Canvas(QtWidgets.QLabel):
             painter.setPen(p)
             self.was[:] = 0
             self.draw = True
-            self.color_bfs(e.x(), e.y(), painter)
+            self.color_filling_by_bfs(e.x(), e.y(), painter)
             painter.end()
             self.update()
-            print("end")
         
 
     def mouseReleaseEvent(self, e):
         self.last_x = None
         self.last_y = None
 
-# map for 15 items and rubber
-COLORS = {
-    'wall': '#787878', 'sky': '#06E6E6', 'tree': '#04C803', 'road': '#8C8C8C', 'door': '#08FF33',
-    'person': '#96053D', 'ground': '#787846', 'water': '#3DE6FA', 'sea': '#0907E6', 'building': '#B47878',
-    'grass': '#04FA07', 'plants': '#CCFF04', 'car': '#0066C8', 'house': '#FF09E0', 'waterfall': '#00E0FF',
-    'rubber': '#ffffff'
-}
 
 class QPaletteButton(QtWidgets.QPushButton):
 
@@ -143,13 +164,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def __init__(self, args):
         super().__init__()
-        '''
+        # prepare models:
         self.core = IECore()
         self.Corr = lib.correspondence_model(args.correspondence_network, self.core)
         self.Gen = lib.generate_model(args.generate_network, self.core)
         self.Seg = lib.segmentation_model(args.segmentation_network, self.core)
-        '''
-        self.resize(922, 696)
+        
+        self.resize(900, 350)
         self.centralwidget = QtWidgets.QWidget(self)
         self.centralwidget.setObjectName("centralwidget")
         # grid 
@@ -169,7 +190,6 @@ class MainWindow(QtWidgets.QMainWindow):
         lst.setBackgroundRole(QPalette.Dark)
         lst.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         lst.setLayout(palette)
-        #scroll.setWidget(palette)
         self.add_palette_buttons(palette)
         scroll = QScrollArea()
         scroll.setWidget(lst)
@@ -274,12 +294,22 @@ class MainWindow(QtWidgets.QMainWindow):
         mask = np.argmax(res, axis=1)
         mask = np.squeeze(mask, 0)
         return mask
-
+    
+    def QPixmap_to_PIL(self):
+        img = self.canvas.pixmap().toImage()
+        buffer = QBuffer()
+        buffer.open(QBuffer.ReadWrite)
+        img.save(buffer, "PNG")
+        bytes = io.BytesIO(buffer.data())
+        return bytes
 
     def preprocess(self):
         # reading
         real_image = self.QPixmapToCvMat(self.canvas.pixmap())
-        input_semantics = self.get_mask_from_image(real_image) + 1
+        self.canvas.get_mask()
+        input_semantics = self.canvas.mask.astype(int)
+        print(input_semantics)
+        print(np.amax(input_semantics))
         reference_image = cv2.imread(self.ref_path)
         reference_semantics = self.get_mask_from_image(self.ref_path) + 1
         #np.testing.assert_allclose(ori_ref_sem, reference_semantics + 1, rtol=1e-03, atol=1e-05)
