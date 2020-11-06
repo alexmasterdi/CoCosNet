@@ -48,6 +48,6 @@ input_sem = torch.randn(1, 151, 256, 256)
 ref_sem = torch.randn(1, 151, 256, 256)
 warp_out = torch.randn(1, 154, 256, 256)
 
-#torch.onnx.export(model.net['netCorr'], (ref_image, real_image, input_sem, ref_sem), "Corr_opset11.onnx", opset_version=11, verbose=True)
+torch.onnx.export(model.net['netCorr'], (ref_image, real_image, input_sem, ref_sem), "onnx_models/Corr_opset11.onnx", opset_version=11, verbose=True, input_names=['ref_image', '', 'input_seg_map'], output_names=['warped_exemplar', 'warped_mask'])
 
-torch.onnx.export(model.net['netG'], (input_sem, warp_out), "Gen_opset11.onnx", opset_version=11, verbose=True)
+torch.onnx.export(model.net['netG'], (input_sem, warp_out), "onnx_models/Gen_opset11.onnx", opset_version=11, verbose=True, input_names=['warped_exemplar', 'warped_exemplar'], output_names=['exemplar_based_output'])
